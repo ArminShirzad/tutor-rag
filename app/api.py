@@ -25,6 +25,7 @@ Design notes worth saying out loud in an interview:
 """
 from __future__ import annotations
 
+import os
 import warnings
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -51,8 +52,27 @@ async def lifespan(app: FastAPI):
         # deployment needs no build step and no pre-baked artefact.
         ensure_index(settings)
         print("[api] loading index and models ...")
-        STATE["engine"] = RAGEngine.from_index(settings.index_dir)
-        engine = STATE["engine"]
+        engine = RAGEngine.from_index(settings.index_dir, settings)
+
+        # HR mode swaps the prompt pack for Persian and enables the
+        # sensitive-topic router. The retrieval pipeline is unchanged -- only
+        # the wording, language and escalation rules are per-product.
+        if os.environ.get("HR_MODE", "").lower() == "true":
+            from app.generation.prompts_hr import (
+                REFUSAL_FA,
+                SYSTEM_PROMPT_FA,
+                build_user_prompt_fa,
+            )
+            from app.safety import SensitiveTopicRouter
+
+            engine.system_prompt = SYSTEM_PROMPT_FA
+            engine.prompt_builder = build_user_prompt_fa
+            engine.refusal = REFUSAL_FA
+            engine.router = SensitiveTopicRouter(embedder=engine.retriever.embedder)
+            STATE["hr_mode"] = True
+            print("[api] HR mode: Persian prompts + sensitive-topic routing enabled")
+
+        STATE["engine"] = engine
         print(f"[api] ready: {len(engine.retriever.store)} chunks, "
               f"embedder={engine.retriever.embedder.name}, "
               f"reranker={engine.retriever.reranker.name if engine.retriever.reranker else None}, "
@@ -82,6 +102,12 @@ class AskRequest(BaseModel):
     mode: str | None = Field(None, description="vector | bm25 | hybrid")
     k: int | None = Field(None, ge=1, le=20)
     rerank: bool | None = None
+    # DEMO ONLY. In production the principal comes from the authenticated
+    # session, never from the request body -- a client that can name its own
+    # role can read anything. It is a request field here purely so the access
+    # control is visible without a login flow.
+    role: str | None = Field(None, description="employee | manager | hr (demo only)")
+    employee_id: str | None = None
 
 
 class SearchRequest(BaseModel):
@@ -105,6 +131,7 @@ def health() -> dict:
         return {"status": "degraded", "reason": STATE.get("error", "no index")}
     return {
         "status": "ok",
+        "hr_mode": bool(STATE.get("hr_mode")),
         "chunks": len(engine.retriever.store),
         "embedder": engine.retriever.embedder.name,
         "reranker": engine.retriever.reranker.name if engine.retriever.reranker else None,
@@ -135,8 +162,25 @@ def stats() -> dict:
 @app.post("/ask")
 def ask(req: AskRequest) -> dict:
     engine = _engine()
-    answer = engine.answer(req.question, mode=req.mode, final_k=req.k, use_reranker=req.rerank)
-    return answer.to_dict()
+    principal = None
+    if req.role:
+        from app.access import Principal
+
+        principal = Principal(
+            employee_id=req.employee_id or "demo-user",
+            role=req.role,
+            name=req.employee_id or req.role,
+        )
+    answer = engine.answer(
+        req.question, mode=req.mode, final_k=req.k, use_reranker=req.rerank,
+        principal=principal,
+    )
+    out = answer.to_dict()
+    if principal is not None:
+        mask = engine.retriever.access_mask(principal)
+        out["diagnostics"]["viewer"] = principal.describe()
+        out["diagnostics"]["visible_chunks"] = f"{int(mask.sum())}/{len(mask)}"
+    return out
 
 
 @app.post("/search")

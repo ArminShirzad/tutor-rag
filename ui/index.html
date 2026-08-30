@@ -91,6 +91,13 @@
         <select id="k"><option>3</option><option selected>5</option><option>8</option></select>
       </label>
       <label class="ctl"><input type="checkbox" id="retrieveOnly"> retrieval only</label>
+      <label class="ctl" id="roleWrap" style="display:none">viewer
+        <select id="role">
+          <option value="employee">رضا · employee</option>
+          <option value="manager">مریم · manager</option>
+          <option value="hr">سحر · HR</option>
+        </select>
+      </label>
     </div>
     <div class="examples" id="examples"></div>
   </div>
@@ -116,9 +123,34 @@ EXAMPLES.forEach(t => {
   $("#examples").appendChild(el);
 });
 
+let HR = false;
+const HR_EXAMPLES = [
+  "چند روز مرخصی استحقاقی دارم و چقدرش به سال بعد منتقل می‌شود؟",
+  "بازه حقوقی سطح Senior Engineer چقدر است؟",
+  "مدیرم دائم سر من داد می‌زند، چه کار کنم؟",
+  "همکارم مدام رفتار بدی با من دارد و حالم بد می‌شود",
+  "ساعت کاری شرکت چند تا چند است؟",
+  "شرایط وام چیست؟"
+];
+
 fetch("/health").then(r => r.json()).then(h => {
   $("#health").textContent = h.status === "ok"
     ? `${h.chunks} chunks · ${h.embedder} · ${h.llm}` : "no index";
+  HR = !!h.hr_mode;
+  if (HR) {
+    $("#roleWrap").style.display = "flex";
+    document.title = "hr-rag";
+    document.querySelector("h1").textContent = "hr-rag";
+    document.querySelector(".sub").textContent = "دستیار منابع انسانی";
+    $("#q").setAttribute("dir", "rtl");
+    $("#examples").innerHTML = "";
+    HR_EXAMPLES.forEach(t => {
+      const el = document.createElement("span");
+      el.className = "chip"; el.textContent = t; el.setAttribute("dir","rtl");
+      el.onclick = () => { $("#q").value = t; run(); };
+      $("#examples").appendChild(el);
+    });
+  }
 }).catch(() => $("#health").textContent = "offline");
 
 const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -154,6 +186,7 @@ async function run() {
     mode: $("#mode").value,
     k: +$("#k").value,
     rerank: $("#rerank").checked,
+    ...(HR ? { role: $("#role").value } : {}),
     ...(retrieveOnly ? { query: question } : { question })
   };
   $("#go").disabled = true;
@@ -179,11 +212,12 @@ async function run() {
     const d = data.diagnostics;
     const answerHtml = esc(data.answer).replace(/\[(\d+)\]/g, '<cite-ref>[$1]</cite-ref>');
     $("#out").innerHTML = `<div class="card">
-      <div class="answer ${data.answered ? "" : "refused"}">${answerHtml}</div>
+      <div class="answer ${data.answered ? "" : "refused"}" ${HR ? 'dir="rtl"' : ""}>${answerHtml}</div>
       ${data.missing_information ? `<div class="warn">missing: ${esc(data.missing_information)}</div>` : ""}
       ${(data.warnings||[]).map(w => `<div class="warn">⚠ ${esc(w)}</div>`).join("")}
       ${renderSources(data.citations, true)}
       <div class="meta">
+        ${d.viewer ? `<span><b>viewer ${esc(d.viewer)}</b></span><span><b>sees ${d.visible_chunks} chunks</b></span>` : ""}
         <span>mode ${d.retrieval_mode}</span>
         <span>reranked ${d.reranked}</span>
         <span>confidence ${data.confidence}</span>
