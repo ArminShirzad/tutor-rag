@@ -11,6 +11,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# Load .env if present. Real environment variables always win, so a container
+# or CI can override the file without editing it.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env", override=False)
+except ImportError:  # python-dotenv is optional
+    pass
 DATA_DIR = ROOT / "data"
 CORPUS_DIR = DATA_DIR / "corpus"
 INDEX_DIR = DATA_DIR / "index"
@@ -54,7 +63,7 @@ class EmbeddingConfig:
     local_model: str = field(
         default_factory=lambda: _env("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
     )
-    gemini_model: str = field(default_factory=lambda: _env("GEMINI_EMBED_MODEL", "text-embedding-004"))
+    gemini_model: str = field(default_factory=lambda: _env("GEMINI_EMBED_MODEL", "gemini-embedding-001"))
     batch_size: int = field(default_factory=lambda: _env_int("EMBED_BATCH", 64))
 
 
@@ -89,7 +98,7 @@ class RetrievalConfig:
 @dataclass
 class GenerationConfig:
     provider: str = field(default_factory=lambda: _env("LLM_PROVIDER", "auto"))  # auto|gemini|extractive
-    model: str = field(default_factory=lambda: _env("LLM_MODEL", "gemini-2.0-flash"))
+    model: str = field(default_factory=lambda: _env("LLM_MODEL", "gemini-3.6-flash"))
     temperature: float = field(default_factory=lambda: _env_float("LLM_TEMPERATURE", 0.1))
     max_output_tokens: int = field(default_factory=lambda: _env_int("LLM_MAX_TOKENS", 1024))
 

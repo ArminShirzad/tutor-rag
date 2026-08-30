@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # The test suite runs offline on purpose: it uses the hashing embedder and
+      # the lexical reranker, so CI needs no model downloads and finishes in
+      # under a second. Tests that need a 90MB download are tests nobody runs.
+      - name: Install (CPU-only torch)
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu \
+                      --extra-index-url https://pypi.org/simple \
+                      -r requirements-dev.txt
+
+      - name: Test
+        run: pytest tests/ -q
+
+      # Proves the documented pipeline actually runs end to end, not just that
+      # the units pass.
+      - name: Smoke test the full pipeline
+        run: |
+          python -m app.cli ingest
+          python -m app.cli stats
+          python -m app.cli ask "what is dropout" --json > /dev/null
+          python -m app.evaluation.run_eval retrieval

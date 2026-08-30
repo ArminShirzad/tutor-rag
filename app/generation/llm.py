@@ -17,6 +17,7 @@ providers on the same eval set without touching the pipeline.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from abc import ABC, abstractmethod
@@ -35,13 +36,20 @@ class LLMResponse:
 
     @property
     def cost_usd(self) -> float:
-        """Rough cost. Gemini 2.0 Flash: $0.10/1M input, $0.40/1M output.
+        """Estimated cost for this request.
 
-        Tracked per request because "cost" is one of the four qualities the
-        role is judged on -- and because an unbounded context is the usual way
-        a RAG bill explodes.
+        Rates are per million tokens and configurable, because published
+        pricing changes and a hardcoded constant silently goes stale. Defaults
+        are Flash-tier list prices; override with PRICE_IN_PER_M /
+        PRICE_OUT_PER_M to match your actual contract.
+
+        Tracked per request because cost is one of the four qualities this
+        system is judged on -- and because an unbounded context is the usual
+        way a RAG bill explodes.
         """
-        return (self.input_tokens * 0.10 + self.output_tokens * 0.40) / 1_000_000
+        price_in = float(os.environ.get("PRICE_IN_PER_M", 0.10))
+        price_out = float(os.environ.get("PRICE_OUT_PER_M", 0.40))
+        return (self.input_tokens * price_in + self.output_tokens * price_out) / 1_000_000
 
 
 class LLM(ABC):
@@ -54,7 +62,7 @@ class LLM(ABC):
 
 
 class GeminiLLM(LLM):
-    def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
+    def __init__(self, api_key: str, model: str = "gemini-3.6-flash"):
         from google import genai
 
         self.client = genai.Client(api_key=api_key)
@@ -195,7 +203,7 @@ def _salvage_json(text: str) -> dict | None:
     return None
 
 
-def build_llm(provider: str = "auto", model: str = "gemini-2.0-flash",
+def build_llm(provider: str = "auto", model: str = "gemini-3.6-flash",
               api_key: str | None = None) -> LLM:
     provider = (provider or "auto").lower()
     if provider in {"auto", "gemini"} and api_key:

@@ -86,28 +86,39 @@ class GeminiEmbedder(Embedder):
     one costs real recall -- a classic silent bug.
     """
 
-    def __init__(self, api_key: str, model: str = "text-embedding-004", batch_size: int = 64):
+    def __init__(self, api_key: str, model: str = "gemini-embedding-001",
+                 batch_size: int = 64, output_dim: int | None = 768):
         from google import genai
 
         self.client = genai.Client(api_key=api_key)
         self.model = model
-        self.dim = 768
-        self.name = f"gemini:{model}"
         self.batch_size = batch_size
+        # gemini-embedding-001 is a Matryoshka model: it is trained so the
+        # leading N dimensions are themselves a usable embedding. Its native
+        # output is 3072-d, but truncating to 768 costs very little accuracy
+        # and makes the index 4x smaller and 4x faster to search. Truncated
+        # vectors must be re-normalised, which encode() does anyway.
+        self.output_dim = output_dim
+        # Probe rather than hardcode -- the dimension differs per model and a
+        # wrong constant produces a silent dimension mismatch at query time.
+        self.dim = len(self._embed_batch(["dimension probe"], is_query=True)[0])
+        self.name = f"gemini:{model}@{self.dim}d"
 
-    def encode(self, texts: list[str], is_query: bool = False) -> np.ndarray:
+    def _embed_batch(self, batch: list[str], is_query: bool) -> list[list[float]]:
         from google.genai import types
 
-        task = "RETRIEVAL_QUERY" if is_query else "RETRIEVAL_DOCUMENT"
+        cfg: dict = {"task_type": "RETRIEVAL_QUERY" if is_query else "RETRIEVAL_DOCUMENT"}
+        if self.output_dim:
+            cfg["output_dimensionality"] = self.output_dim
+        resp = self.client.models.embed_content(
+            model=self.model, contents=batch, config=types.EmbedContentConfig(**cfg)
+        )
+        return [e.values for e in resp.embeddings]
+
+    def encode(self, texts: list[str], is_query: bool = False) -> np.ndarray:
         out: list[list[float]] = []
         for i in range(0, len(texts), self.batch_size):
-            batch = texts[i : i + self.batch_size]
-            resp = self.client.models.embed_content(
-                model=self.model,
-                contents=batch,
-                config=types.EmbedContentConfig(task_type=task),
-            )
-            out.extend(e.values for e in resp.embeddings)
+            out.extend(self._embed_batch(texts[i : i + self.batch_size], is_query))
         return l2_normalize(np.asarray(out, dtype="float32"))
 
 
@@ -148,7 +159,7 @@ def build_embedder(provider: str = "local", model: str = "", api_key: str | None
             print("[embeddings] GEMINI_API_KEY missing -> falling back to local model")
         else:
             try:
-                return GeminiEmbedder(api_key, model or "text-embedding-004", batch_size)
+                return GeminiEmbedder(api_key, model or "gemini-embedding-001", batch_size)
             except Exception as exc:
                 print(f"[embeddings] Gemini unavailable ({exc}) -> falling back to local model")
 
