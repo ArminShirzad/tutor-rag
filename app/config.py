@@ -118,8 +118,10 @@ class Settings:
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     generation: GenerationConfig = field(default_factory=GenerationConfig)
-    corpus_dir: Path = CORPUS_DIR
-    index_dir: Path = INDEX_DIR
+    corpus_dir: Path = field(default_factory=lambda: Path(_env("CORPUS_DIR", str(CORPUS_DIR))))
+    # Overridable because serverless platforms mount a read-only filesystem
+    # with only /tmp writable, so the index cannot live next to the code.
+    index_dir: Path = field(default_factory=lambda: Path(_env("INDEX_DIR", str(INDEX_DIR))))
 
     @property
     def gemini_api_key(self) -> str | None:

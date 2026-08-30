@@ -15,9 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 
 # CPU-only torch: the default wheel bundles CUDA and is ~5x larger for no benefit
 # on a CPU host.
-COPY requirements.txt .
+COPY requirements.txt requirements-local.txt ./
 RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
-        --extra-index-url https://pypi.org/simple -r requirements.txt
+        --extra-index-url https://pypi.org/simple -r requirements-local.txt
 
 COPY app/ ./app/
 COPY ui/ ./ui/

@@ -1,0 +1,17 @@
+# Offline profile: adds the local CPU models.
+#
+#   embeddings  sentence-transformers/all-MiniLM-L6-v2   (384-d, ~90MB)
+#   reranking   cross-encoder/ms-marco-MiniLM-L-6-v2     (~90MB)
+#
+# With these installed the system runs entirely offline -- no API key, no
+# network at query time, no per-query cost. This is the profile the published
+# benchmark numbers were measured on.
+#
+# Install CPU-only torch to avoid pulling ~2GB of CUDA you cannot use:
+#   pip install --index-url https://download.pytorch.org/whl/cpu \
+#               --extra-index-url https://pypi.org/simple -r requirements-local.txt
+
+-r requirements.txt
+
+torch>=2.2
+sentence-transformers>=3.0

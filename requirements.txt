@@ -1,18 +1,17 @@
-# Core retrieval + embedding stack
-numpy>=1.26
-sentence-transformers>=3.0
-torch>=2.2
+# Default profile: lightweight and API-backed. ~150MB installed.
+#
+# Everything the pipeline needs except the local models. Embeddings and
+# reranking go to hosted APIs, which keeps this installable on serverless and
+# on 512MB free-tier containers, where torch alone is ~250MB resident before
+# any model loads.
+#
+# For the offline profile (local CPU models, no API key, no network at query
+# time) install requirements-local.txt instead.
 
-# API
+numpy>=1.26
 fastapi>=0.110
 uvicorn[standard]>=0.29
 pydantic>=2.6
-
-# Document loading
 pypdf>=4.2
-
-# Optional: Gemini generation + embeddings. The system runs without it
-# (falls back to local embeddings + extractive answering).
 google-genai>=1.0
-
 python-dotenv>=1.0

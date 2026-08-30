@@ -148,18 +148,23 @@ See [EVALUATION.md](EVALUATION.md).
 
 ## Deployment profiles
 
-| | Full | Slim |
+| | Default (API) | Offline (local models) |
 |---|---|---|
-| Embeddings | `all-MiniLM-L6-v2`, local CPU | Gemini `gemini-embedding-001` |
-| Reranker | `ms-marco-MiniLM` cross-encoder, local | Listwise LLM reranker |
-| Memory | ~800 MB (torch + 2 models) | ~150 MB |
-| Per-query cost | 1 LLM call | 2 LLM calls (rerank + answer) |
-| Requirements | `requirements.txt` | `requirements-slim.txt` |
+| Embeddings | Gemini `gemini-embedding-001` | `all-MiniLM-L6-v2`, local CPU |
+| Reranker | Listwise LLM reranker | `ms-marco-MiniLM` cross-encoder |
+| Memory | ~150 MB | ~800 MB (torch + 2 models) |
+| Per-query cost | 2 LLM calls (rerank + answer) | 1 LLM call |
+| Network at query time | required | none |
+| Requirements | `requirements.txt` | `requirements-local.txt` |
 
-Free-tier container hosts give 512 MB, and torch alone is ~250 MB resident
-before any model loads. The slim profile moves both models to hosted APIs while
-keeping the pipeline shape identical — still hybrid retrieval, still RRF, still
-two-stage retrieve-then-rerank.
+The default install is deliberately lightweight so it fits serverless and
+512 MB free-tier containers, where torch alone is ~250 MB resident before any
+model loads. The offline profile is one extra install away and is what the
+benchmark numbers above were measured on.
+
+Both keep the pipeline shape identical — hybrid retrieval, RRF, two-stage
+retrieve-then-rerank, grounded generation. Only the providers change, which is
+what the adapters exist for.
 
 The **LLM reranker** is listwise rather than pointwise: one request scores all
 candidates, instead of one request per candidate. That is ~20x cheaper, and
@@ -167,24 +172,33 @@ also more accurate, because the model compares passages against each other
 rather than judging each in isolation.
 
 ```bash
-# slim profile locally
+# API profile explicitly
 EMBED_PROVIDER=gemini RERANK_PROVIDER=llm uvicorn app.api:app
 ```
 
-`render.yaml` deploys the slim profile to Render's free tier. The API builds its
-index on startup if one is missing, and rebuilds when the embedder changed —
-querying a 384-d index with a 768-d model is a silent correctness bug.
+`vercel.json` and `render.yaml` both deploy the API profile. The service builds
+its index on startup if one is missing, and rebuilds when the embedder changed —
+querying a 384-d index with a 768-d model is a silent correctness bug that
+otherwise appears the moment a deployment flips `EMBED_PROVIDER`. See
+[DEPLOY.md](DEPLOY.md).
 
 ## Running it
 
 ```bash
 python -m venv .venv && .venv/Scripts/activate     # Linux/macOS: source .venv/bin/activate
-pip install -r requirements.txt
+
+# offline profile -- local models, no API key needed, and what the benchmarks used
+pip install --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple -r requirements-local.txt
+
 python -m app.cli ingest
 python -m app.cli ask "why does my validation loss increase while training loss drops"
 ```
 
-No API key is required. With no key the system uses local embeddings
+For the lightweight API profile instead, `pip install -r requirements.txt` and
+set `EMBED_PROVIDER=gemini RERANK_PROVIDER=llm`.
+
+**No API key is required.** Without one the system uses local embeddings
 (`all-MiniLM-L6-v2`, CPU) and an **extractive** answerer that returns retrieved
 sentences verbatim with citations — it cannot hallucinate by construction, and it
 serves as the faithfulness floor in evaluation. Add a free

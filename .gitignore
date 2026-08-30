@@ -7,3 +7,5 @@ data/index/
 *.egg-info/
 .DS_Store
 eval_results.json
+.vercel/
+api/__pycache__/

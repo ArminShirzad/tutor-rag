@@ -1,3 +1,6 @@
--r requirements.txt
+# Dev: the full offline profile plus test tooling. CI uses this so both the
+# local-model path and the API path are exercised.
+-r requirements-local.txt
+
 pytest>=8.0
 httpx>=0.27

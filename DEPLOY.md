@@ -2,14 +2,38 @@
 
 The app ships two profiles. Pick by how much memory the host gives you.
 
-| Host | Memory | Profile | Notes |
+| Host | Profile | Card required | Notes |
 |---|---|---|---|
-| Render free | 512 MB | **slim** | Free, no card. Spins down when idle (~50s cold start). |
-| Fly.io / Cloud Run | 1 GB+ | full | Local models, no per-query rerank cost. Card required. |
-| Docker anywhere | 1 GB+ | full | `docker build -t tutor-rag . && docker run -p 7860:7860 tutor-rag` |
-| Hugging Face Spaces | — | full | Docker Spaces require a PRO subscription. |
+| **Vercel** | API | **no** | Free hobby tier. Serverless, so `/tmp` is the only writable path. |
+| Render free | API | yes | Free tier, but the account needs a card on file. |
+| Fly.io / Cloud Run | offline | yes | Local models, no per-query rerank cost. |
+| Docker anywhere | offline | — | `docker build -t tutor-rag . && docker run -p 7860:7860 tutor-rag` |
+| Hugging Face Spaces | offline | yes | Docker Spaces require a PRO subscription; free tier is static-only. |
 
-## Render (free tier)
+## Vercel (free, no card)
+
+```bash
+npx vercel            # first run links the project and prompts for login
+npx vercel --prod
+```
+
+Then set the one secret, either in the dashboard under **Settings →
+Environment Variables**, or:
+
+```bash
+npx vercel env add GEMINI_API_KEY production
+```
+
+`api/index.py` is the entrypoint and `vercel.json` routes all traffic to it.
+Two serverless constraints are handled there:
+
+- **Read-only filesystem.** Only `/tmp` is writable, so `INDEX_DIR` points
+  there. The index is rebuilt on a cold start — about 2 seconds and one batched
+  embedding call for this corpus — then reused while the instance stays warm.
+- **250 MB bundle limit.** torch does not fit, so the deployment uses hosted
+  embeddings and the listwise LLM reranker. Same pipeline, different providers.
+
+## Render (needs a card on the account)
 
 The repo contains `render.yaml`, so Render configures everything itself.
 
