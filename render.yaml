@@ -1,0 +1,46 @@
+# Render blueprint. Connect this repo at https://render.com and it deploys.
+#
+# Uses the slim profile: the free instance has 512MB RAM, which does not fit
+# torch plus two local models. Embeddings and reranking move to the Gemini API.
+services:
+  - type: web
+    name: tutor-rag
+    runtime: python
+    plan: free
+    region: frankfurt
+    buildCommand: "pip install -r requirements-slim.txt"
+    startCommand: "uvicorn app.api:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      # Set this in the Render dashboard -- sync:false keeps it out of git.
+      - key: GEMINI_API_KEY
+        sync: false
+
+      # Slim profile: hosted embeddings + LLM reranker instead of local models.
+      - key: EMBED_PROVIDER
+        value: gemini
+      - key: RERANK_PROVIDER
+        value: llm
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: LLM_MODEL
+        value: gemini-3.6-flash
+
+      # Free-tier Gemini allows 5 requests/minute. Reranking and answering are
+      # two calls per question, so the effective ceiling is ~2 questions/minute.
+      # Raise this on a paid tier.
+      - key: LLM_RPM
+        value: "5"
+      - key: LLM_MAX_RETRIES
+        value: "4"
+
+      # Reranking costs a whole extra LLM call here, so retrieve a smaller
+      # candidate set than the local profile's 20.
+      - key: CANDIDATE_K
+        value: "10"
+      - key: FINAL_K
+        value: "5"
+      - key: RETRIEVAL_MODE
+        value: hybrid
+      - key: PYTHON_VERSION
+        value: "3.11.9"

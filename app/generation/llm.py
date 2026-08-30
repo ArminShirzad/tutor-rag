@@ -23,6 +23,8 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
+from app.resilience import RateLimiter, call_with_retry
+
 
 @dataclass
 class LLMResponse:
@@ -62,12 +64,19 @@ class LLM(ABC):
 
 
 class GeminiLLM(LLM):
-    def __init__(self, api_key: str, model: str = "gemini-3.6-flash"):
+    def __init__(self, api_key: str, model: str = "gemini-3.6-flash",
+                 rpm: int | None = None, max_retries: int | None = None):
         from google import genai
 
         self.client = genai.Client(api_key=api_key)
         self.model = model
         self.name = f"gemini:{model}"
+        # LLM_RPM=0 disables spacing (use it on a paid tier where the limit is
+        # high enough that the retry path alone is sufficient).
+        self.limiter = RateLimiter(
+            int(os.environ.get("LLM_RPM", 5)) if rpm is None else rpm
+        )
+        self.max_retries = int(os.environ.get("LLM_MAX_RETRIES", 4)) if max_retries is None else max_retries
 
     def generate(self, system: str, user: str, temperature: float = 0.1,
                  max_tokens: int = 1024, schema: dict | None = None) -> LLMResponse:
@@ -87,10 +96,15 @@ class GeminiLLM(LLM):
 
         t0 = time.perf_counter()
         try:
-            resp = self.client.models.generate_content(
-                model=self.model,
-                contents=user,
-                config=types.GenerateContentConfig(**cfg),
+            resp = call_with_retry(
+                lambda: self.client.models.generate_content(
+                    model=self.model,
+                    contents=user,
+                    config=types.GenerateContentConfig(**cfg),
+                ),
+                limiter=self.limiter,
+                max_retries=self.max_retries,
+                label="llm",
             )
         except Exception as exc:
             return LLMResponse(

@@ -1,0 +1,20 @@
+# Slim deployment profile -- no torch, no sentence-transformers.
+#
+# Why: the free tier of most container hosts gives 512MB RAM. Importing torch
+# alone costs ~250MB RSS before any model loads, and the two local models add
+# ~180MB more. This profile moves both the embedder and the reranker to hosted
+# APIs, which brings the container to roughly 150MB.
+#
+# What it costs: one extra API round-trip per query for reranking, and tokens.
+# What it keeps: the entire pipeline shape -- hybrid retrieval, RRF, two-stage
+# retrieve-then-rerank, grounded generation, citation verification.
+#
+# Set EMBED_PROVIDER=gemini and RERANK_PROVIDER=llm to use it.
+
+numpy>=1.26
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+pypdf>=4.2
+google-genai>=1.0
+python-dotenv>=1.0

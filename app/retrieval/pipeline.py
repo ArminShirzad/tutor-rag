@@ -111,7 +111,16 @@ class Retriever:
                 f"Index was built with a {store.dim}-d embedder ({store.embedder_name}) but the "
                 f"current embedder is {embedder.dim}-d ({embedder.name}). Re-run: python -m app.cli ingest"
             )
-        reranker = build_reranker(cfg.retrieval.reranker_model) if cfg.retrieval.use_reranker else None
+        reranker = (
+            build_reranker(
+                model_name=cfg.retrieval.reranker_model,
+                provider=cfg.retrieval.reranker_provider,
+                api_key=cfg.gemini_api_key,
+                llm_model=cfg.generation.model,
+            )
+            if cfg.retrieval.use_reranker
+            else None
+        )
         return cls(store, embedder, reranker, cfg)
 
     # ---------------- the pipeline ----------------

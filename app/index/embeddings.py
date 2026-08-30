@@ -23,10 +23,12 @@ while every test still "passes".
 from __future__ import annotations
 
 import hashlib
-import math
+import os
 from abc import ABC, abstractmethod
 
 import numpy as np
+
+from app.resilience import RateLimiter, call_with_retry
 
 
 def l2_normalize(mat: np.ndarray) -> np.ndarray:
@@ -93,6 +95,9 @@ class GeminiEmbedder(Embedder):
         self.client = genai.Client(api_key=api_key)
         self.model = model
         self.batch_size = batch_size
+        # Embedding quota is separate from (and usually higher than) generation
+        # quota, so this defaults to unlimited and relies on the retry path.
+        self.limiter = RateLimiter(int(os.environ.get("EMBED_RPM", 0)))
         # gemini-embedding-001 is a Matryoshka model: it is trained so the
         # leading N dimensions are themselves a usable embedding. Its native
         # output is 3072-d, but truncating to 768 costs very little accuracy
@@ -110,8 +115,12 @@ class GeminiEmbedder(Embedder):
         cfg: dict = {"task_type": "RETRIEVAL_QUERY" if is_query else "RETRIEVAL_DOCUMENT"}
         if self.output_dim:
             cfg["output_dimensionality"] = self.output_dim
-        resp = self.client.models.embed_content(
-            model=self.model, contents=batch, config=types.EmbedContentConfig(**cfg)
+        resp = call_with_retry(
+            lambda: self.client.models.embed_content(
+                model=self.model, contents=batch, config=types.EmbedContentConfig(**cfg)
+            ),
+            limiter=self.limiter,
+            label="embed",
         )
         return [e.values for e in resp.embeddings]
 

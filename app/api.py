@@ -38,21 +38,32 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.engine import RAGEngine
 from app.index.vector_store import VectorStore
+from app.ingest.build import ensure_index
 
 STATE: dict = {}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if VectorStore.exists(settings.index_dir):
+    try:
+        # Container hosts have an ephemeral filesystem, so the index may not
+        # exist on boot. Building it here costs a few seconds once and means a
+        # deployment needs no build step and no pre-baked artefact.
+        ensure_index(settings)
         print("[api] loading index and models ...")
         STATE["engine"] = RAGEngine.from_index(settings.index_dir)
-        print(f"[api] ready: {len(STATE['engine'].retriever.store)} chunks, "
-              f"embedder={STATE['engine'].retriever.embedder.name}, "
-              f"llm={STATE['engine'].llm.name}")
-    else:
-        print(f"[api] WARNING no index at {settings.index_dir}. Run: python -m app.cli ingest")
+        engine = STATE["engine"]
+        print(f"[api] ready: {len(engine.retriever.store)} chunks, "
+              f"embedder={engine.retriever.embedder.name}, "
+              f"reranker={engine.retriever.reranker.name if engine.retriever.reranker else None}, "
+              f"llm={engine.llm.name}")
+    except Exception as exc:
+        # Never crash-loop the container on a startup failure: serve /health as
+        # degraded so the platform reports something actionable instead of an
+        # opaque restart loop.
+        print(f"[api] STARTUP FAILED: {exc}")
         STATE["engine"] = None
+        STATE["error"] = str(exc)
     yield
     STATE.clear()
 
@@ -91,7 +102,7 @@ def _engine() -> RAGEngine:
 def health() -> dict:
     engine = STATE.get("engine")
     if engine is None:
-        return {"status": "degraded", "reason": "no index"}
+        return {"status": "degraded", "reason": STATE.get("error", "no index")}
     return {
         "status": "ok",
         "chunks": len(engine.retriever.store),

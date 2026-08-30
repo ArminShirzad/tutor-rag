@@ -80,6 +80,10 @@ class RetrievalConfig:
     reranker_model: str = field(
         default_factory=lambda: _env("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
     )
+    # auto -> cross-encoder if torch is available, else the LLM reranker, else
+    # lexical. "llm" is what the slim deployment profile uses: a 512MB
+    # container cannot hold torch plus a 90MB cross-encoder.
+    reranker_provider: str = field(default_factory=lambda: _env("RERANK_PROVIDER", "auto"))
     # Below this reranker score we treat the corpus as having no answer and
     # refuse, rather than letting the LLM improvise. This is our main
     # hallucination lever.
