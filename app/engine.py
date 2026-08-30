@@ -183,7 +183,11 @@ class RAGEngine:
             if i in cited_numbers
         ]
 
-        if response.raw_error:
+        if response.degraded_from:
+            warnings.append(
+                f"degraded: {response.degraded_from} unavailable, answered extractively"
+            )
+        elif response.raw_error:
             warnings.append(f"llm_error: {response.raw_error}")
 
         timings["total_ms"] = round((time.perf_counter() - t_start) * 1000, 2)

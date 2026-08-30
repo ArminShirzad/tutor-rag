@@ -35,6 +35,7 @@ class LLMResponse:
     output_tokens: int = 0
     structured: dict | None = None
     raw_error: str | None = None
+    degraded_from: str | None = None  # set when a fallback provider served this
 
     @property
     def cost_usd(self) -> float:
@@ -217,12 +218,51 @@ def _salvage_json(text: str) -> dict | None:
     return None
 
 
-def build_llm(provider: str = "auto", model: str = "gemini-3.6-flash",
+class FallbackLLM(LLM):
+    """Wraps a primary provider and degrades to a fallback instead of erroring.
+
+    This exists because of a concrete failure: the Gemini free tier caps
+    generation at 20 requests **per day** per model. When that cap is hit, the
+    naive behaviour is to hand the user a raw 429 string as their "answer" --
+    the worst possible outcome, since retrieval worked perfectly and we already
+    have the right passages in hand.
+
+    Degrading to extractive answering instead means the user still gets a
+    correct, cited answer built from the retrieved chunks. It is less fluent,
+    and it is honestly labelled as degraded, but the system stays useful.
+
+    This is the difference between "the API failed" and "the product failed".
+    """
+
+    def __init__(self, primary: LLM, fallback: LLM):
+        self.primary = primary
+        self.fallback = fallback
+        self.name = f"{primary.name} (fallback: {fallback.name})"
+
+    def generate(self, system: str, user: str, temperature: float = 0.1,
+                 max_tokens: int = 1024, schema: dict | None = None) -> LLMResponse:
+        resp = self.primary.generate(system, user, temperature, max_tokens, schema)
+        if not resp.raw_error:
+            return resp
+
+        print(f"[llm] {self.primary.name} failed -> degrading to {self.fallback.name}")
+        degraded = self.fallback.generate(system, user, temperature, max_tokens, schema)
+        degraded.degraded_from = self.primary.name
+        degraded.raw_error = resp.raw_error
+        # Keep the primary's latency in the total: the user really did wait for
+        # it, and hiding that would make the latency metrics a lie.
+        degraded.latency_ms += resp.latency_ms
+        return degraded
+
+
+def build_llm(provider: str = "auto", model: str = "gemini-3.1-flash-lite",
               api_key: str | None = None) -> LLM:
     provider = (provider or "auto").lower()
     if provider in {"auto", "gemini"} and api_key:
         try:
-            return GeminiLLM(api_key, model)
+            # Always wrap: an API that works at startup can still be rate
+            # limited, throttled or down at request time.
+            return FallbackLLM(GeminiLLM(api_key, model), ExtractiveLLM())
         except Exception as exc:
             print(f"[llm] Gemini unavailable ({exc}) -> extractive mode")
     elif provider == "gemini" and not api_key:

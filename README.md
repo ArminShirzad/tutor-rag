@@ -1,5 +1,9 @@
 # tutor-rag
 
+[![CI](https://github.com/ArminShirzad/tutor-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/ArminShirzad/tutor-rag/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 A grounded question-answering system over course material. Built to be *operated*,
 not just demoed: hybrid retrieval, cross-encoder reranking, citation-verified
 answers, a calibrated refusal path, and an evaluation harness that measures what

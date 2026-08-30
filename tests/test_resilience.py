@@ -11,6 +11,7 @@ import time
 
 import pytest
 
+from app.generation.llm import ExtractiveLLM, FallbackLLM, LLM, LLMResponse
 from app.resilience import (
     RateLimiter,
     call_with_retry,
@@ -107,3 +108,52 @@ def test_limiter_disabled_when_rpm_is_zero():
     for _ in range(50):
         limiter.wait()
     assert time.monotonic() - t0 < 0.1
+
+
+# --------------------------------------------------------------------- fallback
+CONTEXT = (
+    "CONTEXT\n[1] Source: ml.md\nDropout randomly zeroes activations during "
+    "training with probability p to prevent co-adaptation.\n\n"
+    "QUESTION\nwhat is dropout\n"
+)
+
+
+class _DeadLLM(LLM):
+    name = "fake:always-fails"
+
+    def generate(self, system, user, temperature=0.1, max_tokens=1024, schema=None):
+        return LLMResponse(text="[generation failed: 429]", model=self.name,
+                           latency_ms=120.0, raw_error="429 RESOURCE_EXHAUSTED")
+
+
+class _LiveLLM(LLM):
+    name = "fake:works"
+
+    def generate(self, system, user, temperature=0.1, max_tokens=1024, schema=None):
+        return LLMResponse(text='{"answer": "fine [1]", "answered": true}',
+                           model=self.name, latency_ms=50.0,
+                           structured={"answer": "fine [1]", "answered": True})
+
+
+def test_fallback_serves_an_answer_when_the_primary_fails():
+    """The whole point: a quota error must not become the user's answer."""
+    out = FallbackLLM(_DeadLLM(), ExtractiveLLM()).generate(
+        "sys", CONTEXT, schema={"type": "object"}
+    )
+    assert out.degraded_from == "fake:always-fails"
+    assert out.structured["answered"] is True
+    assert "Dropout" in out.structured["answer"]
+    assert "429" not in out.structured["answer"]
+
+
+def test_fallback_is_transparent_when_the_primary_works():
+    out = FallbackLLM(_LiveLLM(), ExtractiveLLM()).generate("sys", CONTEXT)
+    assert out.degraded_from is None
+    assert out.model == "fake:works"
+
+
+def test_degraded_latency_includes_the_failed_attempt():
+    """Hiding the failed primary's latency would make the metrics lie -- the
+    user really did wait for it."""
+    out = FallbackLLM(_DeadLLM(), ExtractiveLLM()).generate("sys", CONTEXT)
+    assert out.latency_ms >= 120.0

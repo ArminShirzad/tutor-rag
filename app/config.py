@@ -102,7 +102,12 @@ class RetrievalConfig:
 @dataclass
 class GenerationConfig:
     provider: str = field(default_factory=lambda: _env("LLM_PROVIDER", "auto"))  # auto|gemini|extractive
-    model: str = field(default_factory=lambda: _env("LLM_MODEL", "gemini-3.6-flash"))
+    # flash-lite, not flash: the free tier caps the full flash models at 20
+    # generation requests PER DAY, which is not enough to run the eval once,
+    # let alone serve a demo. The lite tier has a far larger daily allowance and
+    # is more than adequate for grounded extraction from retrieved context --
+    # the hard reasoning in this system happens in retrieval, not generation.
+    model: str = field(default_factory=lambda: _env("LLM_MODEL", "gemini-3.1-flash-lite"))
     temperature: float = field(default_factory=lambda: _env_float("LLM_TEMPERATURE", 0.1))
     max_output_tokens: int = field(default_factory=lambda: _env_int("LLM_MAX_TOKENS", 1024))
 
