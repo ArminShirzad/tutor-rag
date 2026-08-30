@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tutor-rag"
+version = "1.0.0"
+description = "Grounded RAG over course material: hybrid retrieval, cross-encoder reranking, calibrated refusal, and an evaluation harness."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Armin Shirzad" }]
+keywords = ["rag", "retrieval", "llm", "embeddings", "hybrid-search", "reranking", "bm25"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[tool.setuptools]
+packages = ["app", "app.ingest", "app.index", "app.retrieval", "app.generation", "app.evaluation"]
+
+[tool.pytest.ini_options]
+# Without this, a bare `pytest` cannot import `app`: pytest only puts the
+# rootdir on sys.path in the legacy "prepend" layout, and running
+# `python -m pytest` locally hides the problem because that adds the cwd
+# itself. CI ran bare `pytest` and failed on ModuleNotFoundError while the
+# same tests passed locally.
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+filterwarnings = [
+    # sentence-transformers 6.x renamed a method and warns via its own shim
+    "ignore::FutureWarning",
+    "ignore::DeprecationWarning",
+]
