@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tutor-rag</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel-2: #1d212a; --border: #272c38;
+    --text: #e6e9ef; --muted: #949cad; --accent: #6ea8fe; --accent-2: #7ee2b8;
+    --warn: #ffcc66; --danger: #ff8f8f; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f7f8fa; --panel:#fff; --panel-2:#f0f2f6; --border:#dde1e8;
+            --text:#1a1d23; --muted:#646c7a; --accent:#2563eb; --accent-2:#0f9d75; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         line-height:1.55; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 20px 80px; }
+  header { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+  h1 { font-size: 22px; margin:0; letter-spacing:-0.01em; }
+  .sub { color:var(--muted); font-size:14px; }
+  .badge { font-family:var(--mono); font-size:11px; padding:2px 8px; border-radius:99px;
+           background:var(--panel-2); border:1px solid var(--border); color:var(--muted); }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px;
+          padding:18px; margin-top:18px; }
+  textarea { width:100%; background:var(--panel-2); color:var(--text); border:1px solid var(--border);
+             border-radius:9px; padding:12px 14px; font-size:15px; font-family:inherit;
+             resize:vertical; min-height:74px; }
+  textarea:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+  .controls { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  label.ctl { font-size:13px; color:var(--muted); display:flex; align-items:center; gap:6px; }
+  select, button { font-family:inherit; font-size:14px; border-radius:8px; border:1px solid var(--border);
+                   background:var(--panel-2); color:var(--text); padding:8px 12px; }
+  button.primary { background:var(--accent); color:#0b0e14; border-color:transparent; font-weight:600;
+                   cursor:pointer; padding:9px 20px; }
+  button.primary:disabled { opacity:.55; cursor:not-allowed; }
+  input[type=checkbox] { accent-color: var(--accent); width:15px; height:15px; }
+  .examples { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .chip { font-size:12.5px; padding:5px 11px; border-radius:99px; background:var(--panel-2);
+          border:1px solid var(--border); color:var(--muted); cursor:pointer; }
+  .chip:hover { color:var(--text); border-color:var(--accent); }
+  .answer { font-size:15.5px; white-space:pre-wrap; }
+  .answer cite-ref { color:var(--accent); font-weight:600; cursor:pointer; font-style:normal; }
+  .refused { color:var(--warn); }
+  h3 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted);
+       margin:22px 0 10px; font-weight:600; }
+  .src { border:1px solid var(--border); border-radius:9px; padding:11px 13px; margin-bottom:9px;
+         background:var(--panel-2); }
+  .src-head { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+  .src-n { font-family:var(--mono); color:var(--accent); font-weight:700; }
+  .src-name { font-size:13.5px; }
+  .src-txt { font-size:13px; color:var(--muted); margin-top:6px; max-height:78px; overflow:hidden; }
+  .scores { font-family:var(--mono); font-size:11.5px; color:var(--muted); display:flex;
+            gap:10px; flex-wrap:wrap; margin-top:7px; }
+  .scores b { color:var(--accent-2); font-weight:600; }
+  .meta { font-family:var(--mono); font-size:11.5px; color:var(--muted); margin-top:16px;
+          padding-top:12px; border-top:1px solid var(--border); display:flex; gap:16px; flex-wrap:wrap; }
+  .warn { color:var(--warn); font-size:13px; margin-top:10px; }
+  .err { color:var(--danger); }
+  .spin { display:inline-block; width:13px; height:13px; border:2px solid var(--border);
+          border-top-color:var(--accent); border-radius:50%; animation:s .7s linear infinite; }
+  @keyframes s { to { transform: rotate(360deg); } }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>tutor-rag</h1>
+    <span class="sub">grounded course assistant</span>
+    <span class="badge" id="health">connecting…</span>
+  </header>
+  <div class="sub">Hybrid retrieval (vector + BM25 via RRF) → cross-encoder rerank → grounded generation with citations. Every answer shows its sources and per-stage timings.</div>
+
+  <div class="card">
+    <textarea id="q" placeholder="Ask something about the course material… e.g. why does my validation loss go up while training loss goes down?"></textarea>
+    <div class="controls">
+      <button class="primary" id="go">Ask</button>
+      <label class="ctl">mode
+        <select id="mode">
+          <option value="hybrid">hybrid</option>
+          <option value="vector">vector only</option>
+          <option value="bm25">bm25 only</option>
+        </select>
+      </label>
+      <label class="ctl"><input type="checkbox" id="rerank" checked> rerank</label>
+      <label class="ctl">top-k
+        <select id="k"><option>3</option><option selected>5</option><option>8</option></select>
+      </label>
+      <label class="ctl"><input type="checkbox" id="retrieveOnly"> retrieval only</label>
+    </div>
+    <div class="examples" id="examples"></div>
+  </div>
+
+  <div id="out"></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const EXAMPLES = [
+  "why does my validation loss increase while training loss keeps dropping",
+  "what is AdamW and how is it different from Adam",
+  "why do we divide by the square root of d_k in attention",
+  "what is the difference between a bi-encoder and a cross-encoder",
+  "my loss became NaN, what should I check",
+  "what is the refund policy for this course"
+];
+
+EXAMPLES.forEach(t => {
+  const el = document.createElement("span");
+  el.className = "chip"; el.textContent = t;
+  el.onclick = () => { $("#q").value = t; run(); };
+  $("#examples").appendChild(el);
+});
+
+fetch("/health").then(r => r.json()).then(h => {
+  $("#health").textContent = h.status === "ok"
+    ? `${h.chunks} chunks · ${h.embedder} · ${h.llm}` : "no index";
+}).catch(() => $("#health").textContent = "offline");
+
+const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = n => n === null || n === undefined ? "–" : (+n).toFixed(3);
+
+function scoreLine(r) {
+  const bits = [];
+  if (r.vector_rank) bits.push(`vector #${r.vector_rank} (${fmt(r.vector_score)})`);
+  if (r.bm25_rank)   bits.push(`bm25 #${r.bm25_rank} (${fmt(r.bm25_score)})`);
+  if (r.rerank_score !== null && r.rerank_score !== undefined)
+    bits.push(`rerank <b>${fmt(r.rerank_score)}</b>`);
+  return bits.map(b => `<span>${b}</span>`).join("");
+}
+
+function renderSources(list, cited) {
+  if (!list.length) return "";
+  return `<h3>Retrieved context${cited ? "" : " (retrieval only)"}</h3>` + list.map((r, i) => `
+    <div class="src">
+      <div class="src-head">
+        <span class="src-n">[${r.number ?? i + 1}]</span>
+        <span class="src-name">${esc(r.citation || r.source)}</span>
+      </div>
+      <div class="src-txt">${esc(r.snippet || r.text || "")}</div>
+      <div class="scores">${scoreLine(r)}</div>
+    </div>`).join("");
+}
+
+async function run() {
+  const question = $("#q").value.trim();
+  if (!question) return;
+  const retrieveOnly = $("#retrieveOnly").checked;
+  const body = {
+    mode: $("#mode").value,
+    k: +$("#k").value,
+    rerank: $("#rerank").checked,
+    ...(retrieveOnly ? { query: question } : { question })
+  };
+  $("#go").disabled = true;
+  $("#out").innerHTML = `<div class="card"><span class="spin"></span> thinking…</div>`;
+  const t0 = performance.now();
+  try {
+    const res = await fetch(retrieveOnly ? "/search" : "/ask", {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "request failed");
+    const wall = (performance.now() - t0).toFixed(0);
+
+    if (retrieveOnly) {
+      $("#out").innerHTML = `<div class="card">
+        ${renderSources(data.results, false)}
+        <div class="meta"><span>mode ${data.mode}</span><span>reranked ${data.reranked}</span>
+        <span>${Object.entries(data.timings_ms).map(([k,v]) => `${k.replace("_ms","")} ${v}ms`).join(" · ")}</span>
+        <span>round trip ${wall}ms</span></div></div>`;
+      return;
+    }
+
+    const d = data.diagnostics;
+    const answerHtml = esc(data.answer).replace(/\[(\d+)\]/g, '<cite-ref>[$1]</cite-ref>');
+    $("#out").innerHTML = `<div class="card">
+      <div class="answer ${data.answered ? "" : "refused"}">${answerHtml}</div>
+      ${data.missing_information ? `<div class="warn">missing: ${esc(data.missing_information)}</div>` : ""}
+      ${(data.warnings||[]).map(w => `<div class="warn">⚠ ${esc(w)}</div>`).join("")}
+      ${renderSources(data.citations, true)}
+      <div class="meta">
+        <span>mode ${d.retrieval_mode}</span>
+        <span>reranked ${d.reranked}</span>
+        <span>confidence ${data.confidence}</span>
+        <span>${d.model}</span>
+        <span>${d.chunks_considered} chunks</span>
+        <span>${Object.entries(d.retrieval_timings_ms||{}).filter(([k])=>k!=="total_ms")
+                 .map(([k,v]) => `${k.replace("_ms","")} ${v}ms`).join(" · ")}</span>
+        <span>total ${d.timings_ms.total_ms}ms</span>
+        <span>${d.input_tokens}in/${d.output_tokens}out</span>
+        <span>$${(d.cost_usd||0).toFixed(6)}</span>
+      </div></div>`;
+  } catch (e) {
+    $("#out").innerHTML = `<div class="card err">${esc(e.message)}</div>`;
+  } finally {
+    $("#go").disabled = false;
+  }
+}
+
+$("#go").onclick = run;
+$("#q").addEventListener("keydown", e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") run();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+# Core retrieval + embedding stack
+numpy>=1.26
+sentence-transformers>=3.0
+torch>=2.2
+
+# API
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+
+# Document loading
+pypdf>=4.2
+
+# Optional: Gemini generation + embeddings. The system runs without it
+# (falls back to local embeddings + extractive answering).
+google-genai>=1.0
+
+python-dotenv>=1.0
