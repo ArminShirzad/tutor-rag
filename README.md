@@ -74,6 +74,35 @@ The cost of that quality is honest: reranking takes retrieval from ~5 ms to ~334
 On this corpus that is the right trade. On a latency-critical path it might not be,
 which is why `USE_RERANKER` is a config flag and the ablation is reproducible.
 
+### End-to-end answer quality
+
+```bash
+python -m app.evaluation.run_eval answers
+```
+
+Same 30 questions, `gemini-3.1-flash-lite` generating:
+
+| Metric | Value |
+|---|---|
+| Keyword coverage (answerable) | **100.0%** |
+| Refusal accuracy (unanswerable) | **100.0%** |
+| False refusals | **0** |
+| Hallucinated answers (should have refused) | **0** |
+| Answers with no citation | **0** |
+| Invalid citations emitted | **0** |
+| Cost, 30 questions | $0.0029 (~$0.0001/question) |
+
+Two caveats, because a table without them is marketing:
+
+- **Keyword coverage is a proxy, not a correctness proof.** It checks that
+  required terms appear; it cannot confirm a claim is genuinely supported by its
+  cited chunk. Proper faithfulness needs LLM-as-judge over (claim, cited span)
+  pairs.
+- **The latency figure from this run is meaningless.** p50 was 7.5 s, which is
+  almost entirely the rate limiter spacing requests to stay inside the free
+  tier's 5/minute. Real per-question latency is retrieval (~334 ms) plus
+  generation (~1-3 s).
+
 ## Hallucination control
 
 Three independent layers, because prompting alone is not a control:

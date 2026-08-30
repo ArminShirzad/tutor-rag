@@ -121,6 +121,34 @@ If the two distributions ever overlap, no threshold separates them. The fix
 then is better retrieval — chunking, embeddings, reranker — not a different
 number. Tuning the threshold in that situation only hides the problem.
 
+## Answer quality
+
+Same 30 questions, end to end, `gemini-3.1-flash-lite` generating:
+
+| Metric | Value |
+|---|---|
+| Keyword coverage (answerable) | 100.0% |
+| Refusal accuracy (unanswerable) | 100.0% |
+| False refusals | 0 |
+| Hallucinated answers (should have refused) | 0 |
+| Answers with no citation | 0 |
+| Invalid citations emitted | 0 |
+| Cost, 30 questions | $0.0029 |
+
+The refusal column is the one that matters most. All four unanswerable
+questions were refused, including *"what is the capital of France"* — which the
+model certainly knows. That is grounding beating parametric memory, which is
+the entire point of the exercise.
+
+Zero invalid citations means the model never referenced a source number it was
+not given. Zero uncited answers means every answer carried provenance.
+
+**The latency figure from this run is not usable.** p50 was 7.5 s, almost
+entirely the rate limiter spacing requests to stay under the free tier's 5 per
+minute. Real per-question latency is retrieval (~334 ms) plus generation
+(~1-3 s). Latency has to be measured without the limiter in the path, or the
+number measures the limiter.
+
 ## A failure the evaluation caught in itself
 
 Worth recording, because it is the most useful thing this harness has done so
