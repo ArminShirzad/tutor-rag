@@ -97,6 +97,51 @@ Three independent layers, because prompting alone is not a control:
    low confidence. A model that cites `[7]` when it was given five sources has
    hallucinated its provenance, and that is detectable without a second LLM.
 
+## Reliability
+
+Hosted LLM APIs rate-limit hard — the Gemini free tier allows 5 requests per
+minute. Every hosted call (generation, embedding, reranking) goes through
+`app/resilience.py`, which pairs a minimum-interval limiter with retry-and-backoff.
+
+Retries honour the `retryDelay` the API returns rather than guessing, and
+non-transient errors (bad key, unknown model) are re-raised immediately —
+retrying those converts a clear error into a timeout.
+
+This was not defensive over-engineering. The first end-to-end eval reported 42%
+keyword coverage with perfect retrieval, and every failure turned out to be a
+429 rather than a bad answer. A system that cannot distinguish *"the model
+answered badly"* from *"the model was never called"* cannot be evaluated at all.
+See [EVALUATION.md](EVALUATION.md).
+
+## Deployment profiles
+
+| | Full | Slim |
+|---|---|---|
+| Embeddings | `all-MiniLM-L6-v2`, local CPU | Gemini `gemini-embedding-001` |
+| Reranker | `ms-marco-MiniLM` cross-encoder, local | Listwise LLM reranker |
+| Memory | ~800 MB (torch + 2 models) | ~150 MB |
+| Per-query cost | 1 LLM call | 2 LLM calls (rerank + answer) |
+| Requirements | `requirements.txt` | `requirements-slim.txt` |
+
+Free-tier container hosts give 512 MB, and torch alone is ~250 MB resident
+before any model loads. The slim profile moves both models to hosted APIs while
+keeping the pipeline shape identical — still hybrid retrieval, still RRF, still
+two-stage retrieve-then-rerank.
+
+The **LLM reranker** is listwise rather than pointwise: one request scores all
+candidates, instead of one request per candidate. That is ~20x cheaper, and
+also more accurate, because the model compares passages against each other
+rather than judging each in isolation.
+
+```bash
+# slim profile locally
+EMBED_PROVIDER=gemini RERANK_PROVIDER=llm uvicorn app.api:app
+```
+
+`render.yaml` deploys the slim profile to Render's free tier. The API builds its
+index on startup if one is missing, and rebuilds when the embedder changed —
+querying a 384-d index with a 768-d model is a silent correctness bug.
+
 ## Running it
 
 ```bash

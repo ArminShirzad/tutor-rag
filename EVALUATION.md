@@ -121,6 +121,37 @@ If the two distributions ever overlap, no threshold separates them. The fix
 then is better retrieval — chunking, embeddings, reranker — not a different
 number. Tuning the threshold in that situation only hides the problem.
 
+## A failure the evaluation caught in itself
+
+Worth recording, because it is the most useful thing this harness has done so
+far.
+
+The first end-to-end run reported **42.3% keyword coverage** and **15 answers
+with no citations** — while retrieval scored a perfect **Hit@3 of 1.000** on
+the same run. Those two numbers cannot both describe a working system, and the
+contradiction is what made the bug findable.
+
+Every one of those 15 failures was an **HTTP 429**. The Gemini free tier allows
+5 requests per minute; the eval fired 30 as fast as it could. The generation
+step never ran. The answers were error strings.
+
+Two things follow:
+
+1. **A rate limit is indistinguishable from a quality regression** unless you
+   look. `answer` was a string, `answered` was true, and the metric dutifully
+   scored it as a bad answer. This is the failure mode where you spend an
+   afternoon tuning prompts against a network error.
+
+2. **The fix belongs in the client, not the eval.** `app/resilience.py` adds a
+   minimum-interval limiter (so we mostly never hit the limit) and retry with
+   backoff (for when we do anyway). Retries use the `retryDelay` the API itself
+   returns rather than a guess, and **non-transient errors are re-raised
+   immediately** — retrying a bad API key just converts a clear error into a
+   timeout.
+
+The eval harness now surfaces `llm_error` warnings in its per-case output
+precisely so this cannot recur silently.
+
 ## What this evaluation does not cover
 
 Stated plainly, because knowing the limits of your own measurement is the point:
