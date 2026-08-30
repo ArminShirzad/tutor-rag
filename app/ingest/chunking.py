@@ -257,7 +257,14 @@ def chunk_document(
                 index=idx,
                 start=start,
                 end=end,
-                metadata={"page": page} if page else {},
+                # Visibility rides on every chunk, not just the document. The
+                # retriever only ever sees chunks, so the access decision has
+                # to be answerable from a chunk alone.
+                metadata={
+                    "visibility": doc.metadata.get("visibility", "public"),
+                    "subject": doc.metadata.get("subject"),
+                    **({"page": page} if page else {}),
+                },
             )
         )
         idx += 1

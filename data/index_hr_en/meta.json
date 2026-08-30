@@ -1,0 +1,5 @@
+{
+  "dim": 384,
+  "count": 8,
+  "embedder": "local:all-MiniLM-L6-v2"
+}

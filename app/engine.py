@@ -85,10 +85,22 @@ _CITE_RE = re.compile(r"\[(\d+)\]")
 
 
 class RAGEngine:
-    def __init__(self, retriever: Retriever, llm: LLM, config: Settings | None = None):
+    def __init__(self, retriever: Retriever, llm: LLM, config: Settings | None = None,
+                 system_prompt: str | None = None, prompt_builder=None,
+                 refusal: str | None = None, router=None):
         self.retriever = retriever
         self.llm = llm
         self.settings = config or default_settings
+        # Swappable prompt pack. The pipeline is domain-agnostic; the prompt is
+        # not. A course tutor and an HR assistant need different refusal
+        # wording, a different language, and different escalation rules -- but
+        # identical retrieval.
+        self.system_prompt = system_prompt or SYSTEM_PROMPT
+        self.prompt_builder = prompt_builder or build_user_prompt
+        self.refusal = refusal or REFUSAL_MESSAGE
+        # Optional: routes harassment/termination/other-people's-data questions
+        # to a human before any retrieval happens.
+        self.router = router
 
     @classmethod
     def from_index(cls, index_dir: Path | None = None, config: Settings | None = None) -> "RAGEngine":
@@ -104,14 +116,34 @@ class RAGEngine:
         final_k: int | None = None,
         use_reranker: bool | None = None,
         structured: bool = True,
+        principal=None,
     ) -> Answer:
         t_start = time.perf_counter()
         timings: dict[str, float] = {}
 
-        # ---- 1. retrieve
+        # ---- 0. sensitive-topic routing, BEFORE retrieval.
+        # Must come first: the refusal gate below can return before generation,
+        # so a rule placed in the system prompt would never execute for exactly
+        # the questions that need it most.
+        if self.router is not None:
+            cat, reason = self.router.check(question)
+            if cat is not None:
+                timings["total_ms"] = round((time.perf_counter() - t_start) * 1000, 2)
+                return Answer(
+                    question=question,
+                    answer=cat.message,
+                    answered=False,
+                    confidence="high",
+                    missing_information="",
+                    timings_ms=timings,
+                    warnings=[f"escalated_to_human: {cat.name} ({reason})"],
+                )
+
+        # ---- 1. retrieve (access pre-filter applied inside)
         t0 = time.perf_counter()
         result = self.retriever.retrieve(
-            question, mode=mode, final_k=final_k, use_reranker=use_reranker
+            question, mode=mode, final_k=final_k, use_reranker=use_reranker,
+            principal=principal,
         )
         timings["retrieval_ms"] = round((time.perf_counter() - t0) * 1000, 2)
 
@@ -122,7 +154,7 @@ class RAGEngine:
             timings["total_ms"] = round((time.perf_counter() - t_start) * 1000, 2)
             return Answer(
                 question=question,
-                answer=REFUSAL_MESSAGE,
+                answer=self.refusal,
                 answered=False,
                 confidence="low",
                 missing_information="No sufficiently relevant passage was found in the indexed course material.",
@@ -132,10 +164,10 @@ class RAGEngine:
             )
 
         # ---- 3. ground + generate
-        user_prompt = build_user_prompt(question, result.chunks)
+        user_prompt = self.prompt_builder(question, result.chunks)
         t0 = time.perf_counter()
         response = self.llm.generate(
-            system=SYSTEM_PROMPT,
+            system=self.system_prompt,
             user=user_prompt,
             temperature=self.settings.generation.temperature,
             max_tokens=self.settings.generation.max_output_tokens,
@@ -148,7 +180,7 @@ class RAGEngine:
         answer_text = (data.get("answer") or response.text or "").strip()
         answered = data.get("answered")
         if answered is None:
-            answered = REFUSAL_MESSAGE.lower() not in answer_text.lower()
+            answered = self.refusal.lower() not in answer_text.lower()
         confidence = data.get("confidence", "medium")
         missing = data.get("missing_information", "") or ""
 
@@ -193,7 +225,7 @@ class RAGEngine:
         timings["total_ms"] = round((time.perf_counter() - t_start) * 1000, 2)
         return Answer(
             question=question,
-            answer=answer_text or REFUSAL_MESSAGE,
+            answer=answer_text or self.refusal,
             answered=bool(answered),
             citations=citations,
             confidence=confidence,

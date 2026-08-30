@@ -124,6 +124,28 @@ class Retriever:
         return cls(store, embedder, reranker, cfg)
 
     # ---------------- the pipeline ----------------
+    def access_mask(self, principal) -> "np.ndarray | None":
+        """Boolean mask over chunks this principal may read.
+
+        Computed per query rather than cached per role, because a principal's
+        own-record access (`subject == employee_id`) is per person, not per
+        role. Cheap: one pass over chunk metadata.
+        """
+        if principal is None:
+            return None
+        import numpy as np
+
+        return np.fromiter(
+            (
+                principal.may_read(
+                    c.metadata.get("visibility", "public"), c.metadata.get("subject")
+                )
+                for c in self.store.chunks
+            ),
+            dtype=bool,
+            count=len(self.store.chunks),
+        )
+
     def retrieve(
         self,
         query: str,
@@ -132,6 +154,7 @@ class Retriever:
         final_k: int | None = None,
         use_reranker: bool | None = None,
         alpha: float | None = None,
+        principal=None,
     ) -> RetrievalResult:
         rc = self.settings.retrieval
         mode = mode or rc.mode
@@ -142,6 +165,9 @@ class Retriever:
 
         timings: dict[str, float] = {}
 
+        # -- access pre-filter, applied to BOTH retrievers before ranking
+        mask = self.access_mask(principal)
+
         # -- dense retrieval
         vector_hits: list[tuple[int, float]] = []
         if mode in {"vector", "hybrid"}:
@@ -149,14 +175,14 @@ class Retriever:
             qvec = self.embedder.encode_one(query, is_query=True)
             timings["embed_ms"] = (time.perf_counter() - t0) * 1000
             t0 = time.perf_counter()
-            vector_hits = self.store.search(qvec, k=candidate_k)
+            vector_hits = self.store.search(qvec, k=candidate_k, allowed=mask)
             timings["vector_search_ms"] = (time.perf_counter() - t0) * 1000
 
         # -- sparse retrieval
         bm25_hits: list[tuple[int, float]] = []
         if mode in {"bm25", "hybrid"}:
             t0 = time.perf_counter()
-            bm25_hits = self.bm25.search(query, k=candidate_k)
+            bm25_hits = self.bm25.search(query, k=candidate_k, allowed=mask)
             timings["bm25_search_ms"] = (time.perf_counter() - t0) * 1000
 
         # -- fusion

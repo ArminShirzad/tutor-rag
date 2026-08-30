@@ -39,6 +39,29 @@ def _doc_id(path: Path, text: str) -> str:
     return h.hexdigest()[:16]
 
 
+_FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+
+
+def _parse_frontmatter(text: str) -> tuple[dict, str]:
+    """Pull a minimal `key: value` front-matter block off the top of a document.
+
+    Hand-rolled rather than pulling in a YAML dependency, because we only need
+    flat string keys and the security-relevant one (`visibility`) must be
+    trivially auditable. A full YAML parser is a large attack surface for a
+    field that gates access control.
+    """
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        return {}, text
+    meta: dict[str, str] = {}
+    for line in m.group(1).splitlines():
+        if ":" not in line or line.strip().startswith("#"):
+            continue
+        key, _, value = line.partition(":")
+        meta[key.strip().lower()] = value.strip().strip("\"'")
+    return meta, text[m.end():]
+
+
 def _clean(text: str) -> str:
     """Normalisation that is safe for every format."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -107,15 +130,25 @@ def load_file(path: Path) -> Document | None:
     if suffix not in LOADERS:
         return None
     raw = LOADERS[suffix](path)
+    meta, raw = _parse_frontmatter(raw)
     text = _clean(raw)
     if not text:
         return None
     return Document(
         doc_id=_doc_id(path, text),
         source=path.name,
-        title=_title_from(path, text),
+        title=meta.get("title") or _title_from(path, text),
         text=text,
-        metadata={"format": suffix.lstrip("."), "chars": len(text)},
+        metadata={
+            "format": suffix.lstrip("."),
+            "chars": len(text),
+            # Default to public. Restricting a document is an explicit act, but
+            # see access.Principal.may_read: an *unrecognised* level fails
+            # closed rather than falling back to public.
+            "visibility": meta.get("visibility", "public").lower(),
+            "subject": meta.get("subject"),
+            **{k: v for k, v in meta.items() if k not in {"title", "visibility", "subject"}},
+        },
     )
 
 

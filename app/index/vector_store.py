@@ -60,15 +60,29 @@ class VectorStore:
         self.chunks.extend(chunks)
         self.matrix = np.vstack([self.matrix, vectors.astype("float32")])
 
-    def search(self, query_vec: np.ndarray, k: int = 10) -> list[tuple[int, float]]:
-        """Exact cosine nearest-neighbour search. Returns (index, score)."""
+    def search(self, query_vec: np.ndarray, k: int = 10,
+               allowed: np.ndarray | None = None) -> list[tuple[int, float]]:
+        """Exact cosine nearest-neighbour search. Returns (index, score).
+
+        `allowed` is a boolean mask over chunks -- the pre-filter. Forbidden
+        rows are set to -inf *before* the top-k selection, so they cannot win a
+        slot. Filtering after the fact would let them consume ranking positions
+        and return fewer results than asked for.
+        """
         if len(self.chunks) == 0:
             return []
         scores = self.matrix @ query_vec.astype("float32")
+        if allowed is not None:
+            if allowed.shape[0] != scores.shape[0]:
+                raise ValueError("access mask length does not match the index")
+            scores = np.where(allowed, scores, -np.inf)
+            if not allowed.any():
+                return []
+            k = min(k, int(allowed.sum()))
         k = min(k, len(scores))
         top = np.argpartition(-scores, k - 1)[:k]
         top = top[np.argsort(-scores[top])]
-        return [(int(i), float(scores[i])) for i in top]
+        return [(int(i), float(scores[i])) for i in top if np.isfinite(scores[i])]
 
     # ---------------- persistence ----------------
     def save(self, index_dir: Path) -> None:

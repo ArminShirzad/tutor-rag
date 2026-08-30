@@ -100,11 +100,23 @@ class BM25:
             scores[docs] += idf * (freqs * (self.k1 + 1)) / (freqs + len_norm[docs])
         return scores
 
-    def search(self, query: str, k: int = 10) -> list[tuple[int, float]]:
-        """Top-k (doc_index, score), highest first, zero-scores dropped."""
+    def search(self, query: str, k: int = 10,
+               allowed: np.ndarray | None = None) -> list[tuple[int, float]]:
+        """Top-k (doc_index, score), highest first, zero-scores dropped.
+
+        `allowed` is the same pre-filter mask the vector store takes. Both
+        retrievers must apply it -- filtering only the dense side would leak
+        restricted content through the keyword side, which is exactly the kind
+        of gap that makes hybrid search a security surface and not just a
+        quality one.
+        """
         scores = self.get_scores(query)
         if not len(scores):
             return []
+        if allowed is not None:
+            if allowed.shape[0] != scores.shape[0]:
+                raise ValueError("access mask length does not match the index")
+            scores = np.where(allowed, scores, 0.0)
         k = min(k, len(scores))
         # argpartition is O(n) vs O(n log n) for a full sort -- matters at scale
         top = np.argpartition(-scores, k - 1)[:k]
